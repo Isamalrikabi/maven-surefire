@@ -90,13 +90,27 @@ public class ModularClasspathForkConfiguration
 
             ModularClasspath modularClasspath = modularClasspathConfiguration.getModularClasspath();
 
+            boolean isMainDescriptor = modularClasspath.isMainDescriptor();
             String moduleName = modularClasspath.getModuleNameFromDescriptor();
             List<String> modulePath = modularClasspath.getModulePath();
             Collection<String> packages = modularClasspath.getPackages();
             File patchFile = modularClasspath.getPatchFile();
             List<String> classpath = toCompleteClasspath( config );
 
-            File argsFile = createArgsFile( moduleName, modulePath, classpath, packages, patchFile, startClass );
+            File argsFile =
+                createArgsFile( moduleName, modulePath, classpath, packages, patchFile, startClass, isMainDescriptor );
+
+            if ( !isMainDescriptor )
+            {
+                cli.createArg().setValue( "--add-modules" );
+                cli.createArg().setValue( "ALL-MODULE-PATH" );
+
+                cli.createArg().setValue( "--add-opens" );
+                cli.createArg().setValue( "org.junit.platform.commons/org.junit.platform.commons.util=ALL-UNNAMED" );
+
+                cli.createArg().setValue( "--add-opens" );
+                cli.createArg().setValue( "org.junit.platform.commons/org.junit.platform.commons.logging=ALL-UNNAMED" );
+            }
 
             cli.createArg().setValue( "@" + escapeToPlatformPath( argsFile.getAbsolutePath() ) );
         }
@@ -112,7 +126,7 @@ public class ModularClasspathForkConfiguration
     @Nonnull
     File createArgsFile( @Nonnull String moduleName, @Nonnull List<String> modulePath,
                          @Nonnull List<String> classPath, @Nonnull Collection<String> packages,
-                         @Nonnull File patchFile, @Nonnull String startClassName )
+                         @Nonnull File patchFile, @Nonnull String startClassName, boolean isMainDescriptor )
             throws IOException
     {
         File surefireArgs = createTempFile( "surefireargs", "", getTempDirectory() );
@@ -167,38 +181,41 @@ public class ModularClasspathForkConfiguration
                         .append( NL );
             }
 
-            args.append( "--patch-module" )
-                    .append( NL )
-                    .append( moduleName )
-                    .append( '=' )
-                    .append( '"' )
-                    .append( replace( patchFile.getPath(), "\\", "\\\\" ) )
-                    .append( '"' )
-                    .append( NL );
-
-            for ( String pkg : packages )
+            if ( isMainDescriptor )
             {
-                args.append( "--add-exports" )
+                args.append( "--patch-module" )
                         .append( NL )
                         .append( moduleName )
-                        .append( '/' )
-                        .append( pkg )
+                        .append( '=' )
+                        .append( '"' )
+                        .append( replace( patchFile.getPath(), "\\", "\\\\" ) )
+                        .append( '"' )
+                        .append( NL );
+
+                for ( String pkg : packages )
+                {
+                    args.append( "--add-exports" )
+                            .append( NL )
+                            .append( moduleName )
+                            .append( '/' )
+                            .append( pkg )
+                            .append( '=' )
+                            .append( "ALL-UNNAMED" )
+                            .append( NL );
+                }
+
+                args.append( "--add-modules" )
+                        .append( NL )
+                        .append( moduleName )
+                        .append( NL );
+
+                args.append( "--add-reads" )
+                        .append( NL )
+                        .append( moduleName )
                         .append( '=' )
                         .append( "ALL-UNNAMED" )
                         .append( NL );
             }
-
-            args.append( "--add-modules" )
-                    .append( NL )
-                    .append( moduleName )
-                    .append( NL );
-
-            args.append( "--add-reads" )
-                    .append( NL )
-                    .append( moduleName )
-                    .append( '=' )
-                    .append( "ALL-UNNAMED" )
-                    .append( NL );
 
             args.append( startClassName );
 

@@ -39,15 +39,19 @@ public final class ModularClasspath
     private final List<String> modulePath;
     private final Collection<String> packages;
     private final File patchFile;
+    private final boolean isMainDescriptor;
 
-    public ModularClasspath( @Nonnull String moduleNameFromDescriptor, @Nonnull List<String> modulePath,
+    public ModularClasspath( @Nonnull String moduleNameFromDescriptor,
+                             @Nonnull List<String> modulePath,
                              @Nonnull Collection<String> packages,
-                             @Nonnull File patchFile )
+                             @Nonnull File patchFile,
+                             boolean isMainDescriptor )
     {
         this.moduleNameFromDescriptor = moduleNameFromDescriptor;
         this.modulePath = modulePath;
         this.packages = packages;
         this.patchFile = patchFile;
+        this.isMainDescriptor = isMainDescriptor;
     }
 
     @Nonnull
@@ -72,5 +76,10 @@ public final class ModularClasspath
     public File getPatchFile()
     {
         return patchFile;
+    }
+
+    public boolean isMainDescriptor()
+    {
+        return isMainDescriptor;
     }
 }

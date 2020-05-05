@@ -80,7 +80,7 @@ public class ModularClasspathForkConfigurationTest
         String startClassName = ForkedBooter.class.getName();
 
         File jigsawArgsFile =
-                config.createArgsFile( "abc", modulePath, classPath, packages, patchFile, startClassName );
+                config.createArgsFile( "abc", modulePath, classPath, packages, patchFile, startClassName, true );
 
         assertThat( jigsawArgsFile )
                 .isNotNull();
@@ -136,7 +136,7 @@ public class ModularClasspathForkConfigurationTest
         assertThat( argsFileLines.get( 12 ) )
                 .isEqualTo( ForkedBooter.class.getName() );
 
-        ModularClasspath modularClasspath = new ModularClasspath( "abc", modulePath, packages, patchFile );
+        ModularClasspath modularClasspath = new ModularClasspath( "abc", modulePath, packages, patchFile, true );
         Classpath testClasspathUrls = new Classpath( singleton( "target" + separator + "test-classes" ) );
         Classpath surefireClasspathUrls = Classpath.emptyClasspath();
         ModularClasspathConfiguration modularClasspathConfiguration =

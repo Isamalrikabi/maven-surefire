@@ -90,6 +90,7 @@ import org.apache.maven.toolchain.DefaultToolchain;
 import org.apache.maven.toolchain.Toolchain;
 import org.apache.maven.toolchain.ToolchainManager;
 import org.apache.maven.toolchain.java.DefaultJavaToolChain;
+import org.codehaus.plexus.languages.java.jpms.JavaModuleDescriptor;
 import org.codehaus.plexus.languages.java.jpms.ResolvePathRequest;
 import org.codehaus.plexus.languages.java.jpms.ResolvePathResult;
 import org.codehaus.plexus.logging.Logger;
@@ -126,6 +127,7 @@ import static java.util.Arrays.asList;
 import static java.util.Collections.addAll;
 import static java.util.Collections.singletonList;
 import static java.util.Collections.singletonMap;
+import static org.apache.maven.surefire.booter.Classpath.emptyClasspath;
 import static org.apache.maven.surefire.shared.lang3.StringUtils.substringBeforeLast;
 import static org.apache.maven.surefire.shared.lang3.SystemUtils.IS_OS_WINDOWS;
 import static org.apache.maven.plugin.surefire.SurefireDependencyResolver.isWithinVersionSpec;
@@ -1388,27 +1390,32 @@ public abstract class AbstractSurefireMojo
 
     private ResolvePathResultWrapper findModuleDescriptor( File jdkHome )
     {
-        File mainBuildPath = getMainBuildPath();
+        ResolvePathResultWrapper test = findModuleDescriptor( jdkHome, getTestClassesDirectory(), false );
+        return test.getResolvePathResult() == null ? findModuleDescriptor( jdkHome, getMainBuildPath(), true ) : test;
+    }
 
-        if ( mainBuildPath.isDirectory() && !new File( mainBuildPath, "module-info.class" ).exists() )
+    private ResolvePathResultWrapper findModuleDescriptor( File jdkHome, File buildPath, boolean isMainDescriptor )
+    {
+        if ( buildPath.isDirectory() && !new File( buildPath, "module-info.class" ).exists() )
         {
-            return new ResolvePathResultWrapper( null, true );
+            return new ResolvePathResultWrapper( null, isMainDescriptor );
         }
 
         try
         {
-            ResolvePathRequest<?> request = ResolvePathRequest.ofFile( mainBuildPath ).setJdkHome( jdkHome );
+            ResolvePathRequest<?> request = ResolvePathRequest.ofFile( buildPath ).setJdkHome( jdkHome );
             ResolvePathResult result = getLocationManager().resolvePath( request );
-            return new ResolvePathResultWrapper( result.getModuleNameSource() == null ? null : result, true );
+            boolean isEmpty = result.getModuleNameSource() == null;
+            return new ResolvePathResultWrapper( isEmpty ? null : result, isMainDescriptor );
         }
         catch ( Exception e )
         {
-            return new ResolvePathResultWrapper( null, true );
+            return new ResolvePathResultWrapper( null, isMainDescriptor );
         }
     }
 
-    private boolean canExecuteProviderWithModularPath( Platform platform,
-                                                       ResolvePathResultWrapper resolvedJavaModularityResult )
+    private boolean canExecuteProviderWithModularPath( @Nonnull Platform platform,
+                                                       @Nonnull ResolvePathResultWrapper resolvedJavaModularityResult )
     {
         return useModulePath()
                 && platform.getJdkExecAttributesForTests().isJava9AtLeast()
@@ -1980,6 +1987,10 @@ public abstract class AbstractSurefireMojo
         @Nonnull DefaultScanResult scanResult, @Nonnull String javaHome, @Nonnull TestClassPath testClasspathWrapper )
             throws IOException
     {
+        boolean isMainDescriptor = moduleDescriptor.isMainModuleDescriptor();
+        JavaModuleDescriptor javaModuleDescriptor = moduleDescriptor.getResolvePathResult().getModuleDescriptor();
+        SortedSet<String> packages = new TreeSet<>();
+
         Classpath testClasspath = testClasspathWrapper.toClasspath();
 
         Classpath providerClasspath = classpathCache.getCachedClassPath( providerName );
@@ -1988,32 +1999,39 @@ public abstract class AbstractSurefireMojo
             providerClasspath = classpathCache.setCachedClasspath( providerName, providerArtifacts );
         }
 
-        ResolvePathsRequest<String> req = ResolvePathsRequest.ofStrings( testClasspath.getClassPath() )
-                .setJdkHome( javaHome )
-                .setModuleDescriptor( moduleDescriptor.getResolvePathResult().getModuleDescriptor() );
-
-        ResolvePathsResult<String> result = getLocationManager().resolvePaths( req );
-        for ( Entry<String, Exception> entry : result.getPathExceptions().entrySet() )
+        Classpath testModulepath;
+        if ( isMainDescriptor )
         {
-            // Probably JDK version < 9. Other known causes: passing a non-jar or a corrupted jar.
-            getConsoleLogger()
-                    .warning( "Exception for '" + entry.getKey() + "'.", entry.getValue() );
+            ResolvePathsRequest<String> req = ResolvePathsRequest.ofStrings( testClasspath.getClassPath() )
+                    .setJdkHome( javaHome )
+                    .setModuleDescriptor( javaModuleDescriptor );
+
+            ResolvePathsResult<String> result = getLocationManager().resolvePaths( req );
+            for ( Entry<String, Exception> entry : result.getPathExceptions().entrySet() )
+            {
+                // Probably JDK version < 9. Other known causes: passing a non-jar or a corrupted jar.
+                getConsoleLogger()
+                        .warning( "Exception for '" + entry.getKey() + "'.", entry.getValue() );
+            }
+
+            testClasspath = new Classpath( result.getClasspathElements() );
+            testModulepath = new Classpath( result.getModulepathElements().keySet() );
+
+            for ( String className : scanResult.getClasses() )
+            {
+                packages.add( substringBeforeLast( className, "." ) );
+            }
+        }
+        else
+        {
+            testModulepath = testClasspath;
+            testClasspath = emptyClasspath();
         }
 
-        testClasspath = new Classpath( result.getClasspathElements() );
-        Classpath testModulepath = new Classpath( result.getModulepathElements().keySet() );
+        getConsoleLogger().debug( "main module descriptor name: " + javaModuleDescriptor.name() );
 
-        SortedSet<String> packages = new TreeSet<>();
-
-        for ( String className : scanResult.getClasses() )
-        {
-            packages.add( substringBeforeLast( className, "." ) );
-        }
-
-        getConsoleLogger().debug( "main module descriptor name: " + result.getMainModuleDescriptor().name() );
-
-        ModularClasspath modularClasspath = new ModularClasspath( result.getMainModuleDescriptor().name(),
-                testModulepath.getClassPath(), packages, getTestClassesDirectory() );
+        ModularClasspath modularClasspath = new ModularClasspath( javaModuleDescriptor.name(),
+                testModulepath.getClassPath(), packages, getTestClassesDirectory(), isMainDescriptor );
 
         Artifact[] additionalInProcArtifacts = { getCommonArtifact(), getBooterArtifact(), getExtensionsArtifact(),
             getApiArtifact(), getSpiArtifact(), getLoggerApiArtifact(), getSurefireSharedUtilsArtifact() };
